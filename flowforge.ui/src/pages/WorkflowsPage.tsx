@@ -1,0 +1,686 @@
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useThemePreference } from '../hooks/useThemePreference'
+import { useLanguagePreference } from '../hooks/useLanguagePreference'
+import Icon from '../components/Icon'
+
+type Workflow = {
+  id: number
+  name: string
+}
+
+type WorkflowExport = {
+  name: string
+  blocks: Array<{
+    id: number
+    name: string
+    systemBlockType: string
+    jsonConfig?: string | null
+    positionX?: number | null
+    positionY?: number | null
+  }>
+  connections: Array<{
+    sourceBlockId: number
+    targetBlockId: number
+    connectionType: string
+    label?: string | null
+  }>
+  variables: Array<{ name: string; defaultValue?: string | null }>
+}
+
+const apiBase = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+
+function normalizeWorkflows(data: unknown): Workflow[] {
+  if (Array.isArray(data)) {
+    return data as Workflow[]
+  }
+
+  if (data && typeof data === 'object' && '$values' in data) {
+    const values = (data as { $values?: unknown }).$values
+    return Array.isArray(values) ? (values as Workflow[]) : []
+  }
+
+  return []
+}
+
+export default function WorkflowsPage() {
+  const [workflows, setWorkflows] = useState<Workflow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const cacheRef = useRef<Workflow[] | null>(null)
+  const [newName, setNewName] = useState('')
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editingName, setEditingName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importStatus, setImportStatus] = useState<string | null>(null)
+  const [versionsOpenId, setVersionsOpenId] = useState<number | null>(null)
+  const [versions, setVersions] = useState<
+    Array<{ id: number; label?: string | null; version: string; createdAt: string; isActive: boolean }>
+  >([])
+  const [versionsLoading, setVersionsLoading] = useState(false)
+  const [versionsError, setVersionsError] = useState<string | null>(null)
+  const [versionsFilter, setVersionsFilter] = useState<'all' | 'active'>('all')
+  const [sortDesc, setSortDesc] = useState(true)
+  const [actionMenuId, setActionMenuId] = useState<number | null>(null)
+  const { theme, toggleTheme } = useThemePreference()
+  const { language } = useLanguagePreference()
+  const navigate = useNavigate()
+
+  const hasWorkflows = workflows.length > 0
+
+  const copy = language === 'pl'
+    ? {
+        navWorkflows: 'Workflowy',
+        navBlocks: 'Bloki',
+        navExecutions: 'Egzekucje',
+        navScheduler: 'Scheduler',
+        title: 'Projekty workflow',
+        subtitle: 'Zarządzaj projektami przed łączeniem bloków i konektorów.',
+        createTitle: 'Utwórz nowy workflow',
+        createHint: 'Użyj krótkiej, opisowej nazwy.',
+        workflowLabel: 'Nazwa workflow',
+        workflowPlaceholder: 'np. Onboarding klienta',
+        createAction: 'Utwórz',
+        importTitle: 'Import / Eksport',
+        importHint: 'Pobierz workflow jako JSON lub zaimportuj jako nowy projekt.',
+        importLabel: 'Importuj workflow JSON',
+        importHelp: 'Wybierz plik .json, aby utworzyć nowy workflow.',
+        chooseFile: 'Wybierz plik',
+        exportHint: 'Użyj przycisku Export przy workflow poniżej.',
+        existingTitle: 'Istniejące workflowy',
+        existingHint: 'Zmień nazwę lub usuń projekty przed budowaniem flow.',
+        open: 'Otwórz',
+        export: 'Exportuj',
+        rename: 'Zmień nazwę',
+        delete: 'Usuń',
+        crudReady: 'CRUD gotowe',
+        countLabel: 'łącznie'
+      }
+    : {
+        navWorkflows: 'Workflows',
+        navBlocks: 'Blocks',
+        navExecutions: 'Executions',
+        navScheduler: 'Scheduler',
+        title: 'Workflow projects',
+        subtitle: 'Manage projects before wiring blocks and connections in React Flow.',
+        createTitle: 'Create new workflow',
+        createHint: 'Use a short, descriptive name.',
+        workflowLabel: 'Workflow name',
+        workflowPlaceholder: 'e.g. Customer onboarding',
+        createAction: 'Create',
+        importTitle: 'Import / Export',
+        importHint: 'Download a workflow JSON or import one as a new project.',
+        importLabel: 'Import workflow JSON',
+        importHelp: 'Select a .json file to create a new workflow.',
+        chooseFile: 'Choose file',
+        exportHint: 'Use the Export button next to a workflow below.',
+        existingTitle: 'Existing workflows',
+        existingHint: 'Rename or delete projects before building flows.',
+        open: 'Open',
+        export: 'Export',
+        rename: 'Rename',
+        delete: 'Delete',
+        crudReady: 'CRUD ready',
+        countLabel: 'total'
+      }
+
+  const statusLabel = useMemo(() => {
+    if (loading) return 'Loading workflows...'
+    if (error) return error
+    if (!hasWorkflows) return 'No workflows yet. Create your first project.'
+    return ''
+  }, [error, hasWorkflows, loading])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadWorkflows() {
+      if (cacheRef.current) {
+        setWorkflows(cacheRef.current)
+        setLoading(false)
+        return
+      }
+      setLoading(true)
+      setError(null)
+      try {
+        const response = await fetch(`${apiBase}/api/Workflow`)
+        if (!response.ok) {
+          throw new Error(`Failed to load workflows (${response.status})`)
+        }
+        const data = (await response.json()) as unknown
+        if (!cancelled) {
+          const normalized = normalizeWorkflows(data)
+          cacheRef.current = normalized
+          setWorkflows(normalized)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Unable to load workflows')
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadWorkflows()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function createWorkflow(event: FormEvent) {
+    event.preventDefault()
+    if (!newName.trim() || saving) return
+    setSaving(true)
+    setError(null)
+
+    try {
+      const response = await fetch(`${apiBase}/api/Workflow`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName.trim() }),
+      })
+      if (!response.ok) {
+        throw new Error(`Failed to create workflow (${response.status})`)
+      }
+      const created = (await response.json()) as Workflow
+      setWorkflows((current) => {
+        const next = [created, ...current]
+        cacheRef.current = next
+        return next
+      })
+      setNewName('')
+      navigate(`/workflows/${created.id}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to create workflow')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function startEditing(workflow: Workflow) {
+    setEditingId(workflow.id)
+    setEditingName(workflow.name)
+    setActionMenuId(null)
+  }
+
+  function cancelEditing() {
+    setEditingId(null)
+    setEditingName('')
+  }
+
+  async function updateWorkflow(event: FormEvent) {
+    event.preventDefault()
+    if (editingId === null || saving) return
+    const trimmed = editingName.trim()
+    if (!trimmed) return
+
+    setSaving(true)
+    setError(null)
+
+    try {
+      const response = await fetch(`${apiBase}/api/Workflow/${editingId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: editingId, name: trimmed }),
+      })
+      if (!response.ok) {
+        throw new Error(`Failed to update workflow (${response.status})`)
+      }
+      setWorkflows((current) =>
+        current.map((item) => {
+          if (item.id === editingId) {
+            return { ...item, name: trimmed }
+          }
+          return item
+        }),
+      )
+      cacheRef.current = (cacheRef.current ?? []).map((item) =>
+        item.id === editingId ? { ...item, name: trimmed } : item,
+      )
+      cancelEditing()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update workflow')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function deleteWorkflow(workflowId: number) {
+    if (saving) return
+    setSaving(true)
+    setError(null)
+
+    try {
+      const response = await fetch(`${apiBase}/api/Workflow/${workflowId}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        throw new Error(`Failed to delete workflow (${response.status})`)
+      }
+      setWorkflows((current) => current.filter((item) => item.id !== workflowId))
+      cacheRef.current = (cacheRef.current ?? []).filter((item) => item.id !== workflowId)
+      if (editingId === workflowId) {
+        cancelEditing()
+      }
+      if (actionMenuId === workflowId) {
+        setActionMenuId(null)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to delete workflow')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function exportWorkflow(workflowId: number, name: string) {
+    try {
+      const response = await fetch(`${apiBase}/api/Workflow/${workflowId}/export`)
+      if (!response.ok) {
+        throw new Error(`Export failed (${response.status})`)
+      }
+      const data = (await response.json()) as WorkflowExport
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${name || 'workflow'}-${workflowId}.json`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to export workflow')
+    }
+  }
+
+  async function importWorkflow(file: File) {
+    setImporting(true)
+    setImportStatus(null)
+    setError(null)
+    try {
+      const text = await file.text()
+      const payload = JSON.parse(text) as unknown
+      const response = await fetch(`${apiBase}/api/Workflow/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) {
+        throw new Error(`Import failed (${response.status})`)
+      }
+      const created = (await response.json()) as Workflow
+      setImportStatus(`Imported as "${created.name}" (id ${created.id}).`)
+      setWorkflows((current) => [created, ...current])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to import workflow')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  function normalizeVersions(data: unknown) {
+    if (Array.isArray(data)) return data as typeof versions
+    if (data && typeof data === 'object' && '$values' in data) {
+      const values = (data as { $values?: unknown }).$values
+      return Array.isArray(values) ? (values as typeof versions) : []
+    }
+    return []
+  }
+
+  async function loadVersions(workflowId: number) {
+    setVersionsLoading(true)
+    setVersionsError(null)
+    try {
+      const response = await fetch(`${apiBase}/api/WorkflowRevision/workflow/${workflowId}`)
+      if (!response.ok) throw new Error(`Failed to load versions (${response.status})`)
+      const data = (await response.json()) as unknown
+      const normalized = normalizeVersions(data)
+      setVersions(normalized)
+    } catch (err) {
+      setVersionsError(err instanceof Error ? err.message : 'Unable to load versions')
+      setVersions([])
+    } finally {
+      setVersionsLoading(false)
+    }
+  }
+
+  async function openVersionsModal(workflowId: number) {
+    setVersionsOpenId(workflowId)
+    setActionMenuId(null)
+    await loadVersions(workflowId)
+  }
+
+  function closeVersionsModal() {
+    setVersionsOpenId(null)
+    setVersions([])
+    setVersionsError(null)
+    setVersionsFilter('all')
+    setSortDesc(true)
+  }
+
+  async function deleteVersion(versionId: number) {
+    try {
+      const response = await fetch(`${apiBase}/api/WorkflowRevision/${versionId}`, { method: 'DELETE' })
+      if (!response.ok) throw new Error(`Failed to delete version (${response.status})`)
+      if (versionsOpenId !== null) {
+        await loadVersions(versionsOpenId)
+      }
+    } catch (err) {
+      setVersionsError(err instanceof Error ? err.message : 'Unable to delete version')
+    }
+  }
+
+  async function restoreVersion(versionId: number, workflowId: number) {
+    try {
+      const response = await fetch(`${apiBase}/api/WorkflowRevision/${versionId}/restore`, {
+        method: 'POST',
+      })
+      if (!response.ok) throw new Error(`Failed to restore version (${response.status})`)
+      await loadVersions(workflowId)
+    } catch (err) {
+      setVersionsError(err instanceof Error ? err.message : 'Unable to restore version')
+    }
+  }
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <span className="brand-mark">F</span>
+          <div>
+            <p className="brand-name">Flowforge</p>
+            <p className="brand-subtitle">Workflow Studio</p>
+          </div>
+        </div>
+        <nav className="nav">
+          <button type="button" className="nav-item active">
+            {copy.navWorkflows}
+          </button>
+          <button type="button" className="nav-item" onClick={() => navigate('/blocks')}>
+            {copy.navBlocks}
+          </button>
+          <button type="button" className="nav-item" onClick={() => navigate('/executions')}>
+            {copy.navExecutions}
+          </button>
+          <button type="button" className="nav-item" onClick={() => navigate('/scheduler')}>
+            {copy.navScheduler}
+          </button>
+        </nav>
+        <div className="sidebar-footer">
+          <p>Connected to local API</p>
+          <span className="pill">{apiBase || 'proxy /api'}</span>
+        </div>
+      </aside>
+
+      <main className="main">
+        <header className="topbar">
+          <div>
+            <h1>{copy.title}</h1>
+            <p className="subtitle">{copy.subtitle}</p>
+          </div>
+          <div className="topbar-meta">
+            <button
+              type="button"
+              className="icon-button"
+              onClick={toggleTheme}
+              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            >
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
+            </button>
+            <span className="count">{workflows.length} total</span>
+            <span className="pill">CRUD ready</span>
+          </div>
+        </header>
+
+        <section className="panel">
+          <div className="panel-header">
+            <h2>{copy.createTitle}</h2>
+            <p className="muted">{copy.createHint}</p>
+          </div>
+          <form className="create-form" onSubmit={createWorkflow}>
+            <label htmlFor="workflow-name">Workflow name</label>
+            <div className="create-controls">
+              <input
+                id="workflow-name"
+                type="text"
+                value={newName}
+                onChange={(event) => setNewName(event.target.value)}
+                placeholder="e.g. Customer onboarding"
+                maxLength={120}
+              />
+              <button type="submit" disabled={!newName.trim() || saving}>
+                Create
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <h2>{copy.importTitle}</h2>
+            <p className="muted">{copy.importHint}</p>
+          </div>
+          <div className="import-export">
+            <div className="upload-card">
+              <div>
+                <p className="label">Import workflow JSON</p>
+                <p className="muted">Select a .json file to create a new workflow.</p>
+              </div>
+              <label className={`upload-pill ${importing ? 'disabled' : ''}`}>
+                <input
+                  type="file"
+                  accept="application/json"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (file) {
+                      importWorkflow(file)
+                      event.target.value = ''
+                    }
+                  }}
+                  disabled={importing}
+                />
+                <span>{importing ? 'Importing…' : 'Choose file'}</span>
+              </label>
+              {importStatus && <p className="meta">{importStatus}</p>}
+            </div>
+            <div className="export-hint">
+              <p className="label">Export</p>
+              <p className="muted">Use the Export button next to a workflow below.</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <h2>Existing workflows</h2>
+            <p className="muted">Rename or delete projects before building flows.</p>
+          </div>
+
+          {statusLabel ? (
+            <div className="state">{statusLabel}</div>
+          ) : (
+            <ul className="workflow-list">
+              {workflows.map((workflow) => (
+                <li key={workflow.id} className="workflow-card">
+                  <div>
+                    <p className="label">Workflow</p>
+                    {editingId === workflow.id ? (
+                      <form className="edit-form" onSubmit={updateWorkflow}>
+                        <input
+                          type="text"
+                          value={editingName}
+                          onChange={(event) => setEditingName(event.target.value)}
+                          maxLength={120}
+                          autoFocus
+                        />
+                        <div className="card-actions">
+                          <button type="submit" disabled={!editingName.trim() || saving}>
+                            Save
+                          </button>
+                          <button type="button" onClick={cancelEditing} className="ghost">
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <>
+                        <h3>{workflow.name}</h3>
+                        <p className="meta">ID: {workflow.id}</p>
+                      </>
+                    )}
+                  </div>
+                  {editingId !== workflow.id && (
+                    <div className="card-actions" style={{ position: 'relative', gap: '0.5rem' }}>
+                      <button type="button" onClick={() => navigate(`/workflows/${workflow.id}`)}>
+                        {copy.open}
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => setActionMenuId((current) => (current === workflow.id ? null : workflow.id))}
+                      >
+                        More
+                      </button>
+                      {actionMenuId === workflow.id && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: '110%',
+                            right: 0,
+                            background: 'var(--panel)',
+                            border: '1px solid var(--border-soft)',
+                            borderRadius: 12,
+                            boxShadow: '0 12px 30px rgba(0,0,0,0.12)',
+                            padding: '0.5rem',
+                            display: 'grid',
+                            gap: '0.35rem',
+                            minWidth: 180,
+                            zIndex: 10,
+                          }}
+                        >
+                          <button type="button" className="ghost" onClick={() => exportWorkflow(workflow.id, workflow.name)}>
+                            {copy.export}
+                          </button>
+                          <button type="button" className="ghost" onClick={() => openVersionsModal(workflow.id)}>
+                            Versions
+                          </button>
+                          <button type="button" className="ghost" onClick={() => startEditing(workflow)}>
+                            {copy.rename}
+                          </button>
+                          <button type="button" className="ghost danger" onClick={() => deleteWorkflow(workflow.id)}>
+                            {copy.delete}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {versionsOpenId !== null && (
+          <div
+            className="modal-overlay"
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.38)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}
+          >
+            <div className="panel" style={{ width: '92%', maxWidth: 820, maxHeight: '80vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: 'var(--card)', border: '1px solid rgba(0,0,0,0.08)' }}>
+              <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h2 style={{ margin: 0 }}>Versions (workflow #{versionsOpenId})</h2>
+                  <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
+                    Migawki zapisywane automatycznie przy zapisie workflowu.
+                  </p>
+                </div>
+                <button type="button" className="ghost" onClick={closeVersionsModal}>
+                  Close
+                </button>
+              </div>
+              <div style={{ overflow: 'auto', paddingRight: 4 }}>
+                {versionsError && <p className="error">{versionsError}</p>}
+                {versionsLoading ? (
+                  <p className="muted">Ładowanie wersji...</p>
+                ) : versions.length === 0 ? (
+                  <p className="muted">Brak wersji.</p>
+                ) : (
+                  <div>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+                      <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span className="muted">Pokaż tylko aktywne</span>
+                        <span className="toggle">
+                          <input
+                            type="checkbox"
+                            checked={versionsFilter === 'active'}
+                            onChange={(event) => setVersionsFilter(event.target.checked ? 'active' : 'all')}
+                          />
+                          <span className="slider" />
+                        </span>
+                      </label>
+                      <button type="button" className="ghost" onClick={() => setSortDesc((curr) => !curr)}>
+                        Sortuj wg daty: {sortDesc ? 'najnowsze' : 'najstarsze'}
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {versions
+                        .filter((rev) => (versionsFilter === 'active' ? rev.isActive : true))
+                        .slice()
+                        .sort((a, b) =>
+                          sortDesc
+                            ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+                            : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+                        )
+                        .map((rev) => (
+                          <div
+                            key={rev.id}
+                            className="menu-row"
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              padding: '12px 14px',
+                              borderRadius: 12,
+                              background: 'var(--card)',
+                              border: rev.isActive ? '1px solid #2f9e68' : '1px solid rgba(0,0,0,0.08)',
+                              gap: 12,
+                              transition: 'transform 120ms ease, border-color 120ms ease',
+                            }}
+                          >
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                <strong style={{ whiteSpace: 'nowrap' }}>{rev.label || rev.version}</strong>
+                                <span className="pill muted">{rev.version}</span>
+                                {rev.isActive && (
+                                  <span className="pill" style={{ background: '#2f9e68', color: '#0a0d0a' }}>
+                                    Active
+                                  </span>
+                                )}
+                              </div>
+                              <span className="muted" style={{ fontSize: 13 }}>
+                                {new Date(rev.createdAt).toLocaleString()}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              <button type="button" className="ghost" onClick={() => restoreVersion(rev.id, versionsOpenId)}>
+                                Przywróć
+                              </button>
+                              <button type="button" className="ghost danger" onClick={() => deleteVersion(rev.id)}>
+                                Usuń
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  )
+}

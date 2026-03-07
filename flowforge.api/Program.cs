@@ -1,0 +1,111 @@
+using System.Text.Json.Serialization;
+using Flowforge.Data;
+using Flowforge.Models;
+using Flowforge.Repositories;
+using Flowforge.Services;
+using Microsoft.EntityFrameworkCore;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Dodawanie serwisów do kontenera DI
+builder.Services.AddControllers();
+
+builder.Services.AddDbContext<FlowforgeDbContext>(options => 
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.Preserve;
+    });
+
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
+
+builder.Services.AddScoped<IWorkflowRepository, WorkflowRepository>();
+builder.Services.AddScoped<IWorkflowService, WorkflowService>();
+
+builder.Services.AddScoped<IBlockRepository, BlockRepository>();
+builder.Services.AddScoped<IBlockService, BlockService>();
+
+builder.Services.AddScoped<IWorkflowVariableRepository, WorkflowVariableRepository>();
+builder.Services.AddScoped<IWorkflowVariableService, WorkflowVariableService>();
+
+builder.Services.AddScoped<IBlockConnectionRepository, BlockConnectionRepository>();
+builder.Services.AddScoped<IBlockConnectionService, BlockConnectionService>();
+
+builder.Services.AddScoped<ISystemBlockRepository, SystemBlockRepository>();
+builder.Services.AddScoped<ISystemBlockService, SystemBlockService>();
+
+builder.Services.AddScoped<IBlockExecutor, CalculationBlockExecutor>();
+builder.Services.AddScoped<IBlockExecutor, ConditionBlockExecutor>();
+builder.Services.AddScoped<IBlockExecutor, SwitchBlockExecutor>();
+builder.Services.AddScoped<IBlockExecutor, HttpRequestBlockExecutor>();
+builder.Services.AddScoped<IBlockExecutor, ParserBlockExecutor>();
+builder.Services.AddScoped<IBlockExecutor, TextTransformBlockExecutor>();
+builder.Services.AddScoped<IBlockExecutor, TextReplaceBlockExecutor>();
+builder.Services.AddScoped<IBlockExecutor, DefaultBlockExecutor>();
+builder.Services.AddHttpClient();
+
+builder.Services.AddScoped<IWorkflowExecutionRepository, WorkflowExecutionRepository>();
+builder.Services.AddScoped<IWorkflowExecutionService, WorkflowExecutionService>();
+
+builder.Services.AddScoped<IWorkflowRevisionRepository, WorkflowRevisionRepository>();
+builder.Services.AddScoped<IWorkflowRevisionService, WorkflowRevisionService>();
+
+builder.Services.AddScoped<IWorkflowScheduleRepository, WorkflowScheduleRepository>();
+builder.Services.AddScoped<IWorkflowScheduleService, WorkflowScheduleService>();
+builder.Services.AddHostedService<WorkflowSchedulerHostedService>();
+
+var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<FlowforgeDbContext>();
+    context.Database.Migrate();
+    var requiredBlocks = new[]
+    {
+        new SystemBlock { Type = "Start", Description = "Start block" },
+        new SystemBlock { Type = "End", Description = "End block" },
+        new SystemBlock { Type = "Calculation", Description = "Calculation block" },
+        new SystemBlock { Type = "If", Description = "Conditional block" },
+        new SystemBlock { Type = "Switch", Description = "Switch (case) block" },
+        new SystemBlock { Type = "HttpRequest", Description = "HTTP request block" },
+        new SystemBlock { Type = "Parser", Description = "Parser JSON/XML" },
+        new SystemBlock { Type = "Loop", Description = "Loop block" },
+        new SystemBlock { Type = "Wait", Description = "Wait (delay) block" },
+        new SystemBlock { Type = "TextTransform", Description = "Transform text casing" },
+        new SystemBlock { Type = "TextReplace", Description = "Replace text (literal or regex)" }
+    };
+
+    foreach (var block in requiredBlocks)
+    {
+        if (!context.SystemBlocks.Any(sb => sb.Type == block.Type))
+        {
+            context.SystemBlocks.Add(block);
+        }
+        else
+        {
+            var existing = context.SystemBlocks.First(sb => sb.Type == block.Type);
+            existing.Description = block.Description;
+        }
+    }
+
+    context.SaveChanges();
+}
+
+// Konfiguracja pipeline
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Home/Error");
+    app.UseHsts();
+}
+
+app.MapControllers();
+app.UseHttpsRedirection();
+app.UseRouting();
+app.UseAuthorization();
+app.Run();

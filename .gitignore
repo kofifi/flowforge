@@ -1,0 +1,66 @@
+**/bin/
+**/obj/
+**/packages/
+**/.idea/
+**/.vscode/
+**/.DS_Store
+**/*.user
+**/*.suo
+**/*.DotSettings.user
+.vs/
+node_modules/
+TestResult*/
+*.coverage
+*.coveragejson
+riderModule.iml
+/_ReSharper.Caches/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+.npm/
+.env
+.env.*
+
+# Frontend
+flowforge.ui/node_modules/
+flowforge.ui/dist/
+flowforge.ui/.eslintcache
+flowforge.ui/.turbo
+flowforge.ui/.parcel-cache
+flowforge.playwright/tests/e2e/artifacts/
+flowforge.playwright/playwright-report/
+flowforge.playwright/test-results/
+flowforge.playwright/.cache/
+
+# Backend
+flowforge.api/flowforge.db*
+
+# Docs and presentations
+docs/
+presentation/
+latex/node_modules/
+
+# LaTeX build artifacts and local backups
+latex/*.aux
+latex/*.bbl
+latex/*.bcf
+latex/*.blg
+latex/*.fdb_latexmk
+latex/*.fls
+latex/*.lof
+latex/*.log
+latex/*.lol
+latex/*.out
+latex/*.run.xml
+latex/*.synctex.gz
+latex/*.toc
+latex/*.xdv
+latex/main.pdf.bak
+latex/main.tex.bak
+latex/main.tex-old*
+latex/main.tmp
+latex/artifacts/
+
+# Windows metadata leftovers
+*.Zone.Identifier

@@ -1,0 +1,8 @@
+{
+  "name": "flowforge-monorepo-scripts",
+  "private": true,
+  "scripts": {
+    "presentation": "npm --prefix flowforge.playwright run docs",
+    "thesis": "npm --prefix latex run latex"
+  }
+}
